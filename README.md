@@ -1,0 +1,318 @@
+# Roadmap Penggunaan — Sistem Distribusi Barang
+
+Dokumen ini menjelaskan **alur kerja penggunaan aplikasi**, dari setup awal
+sampai siklus kerja harian/bulanan. Beda dari `README.md` (yang isinya
+catatan teknis tiap batch pengembangan untuk developer), dokumen ini
+ditulis untuk **pemakai aplikasi** — pemilik bisnis, admin, dan staf
+operasional — supaya paham urutan pemakaian yang benar.
+
+---
+
+## 1. Gambaran Umum
+
+Aplikasi ini menggantikan sistem lama berbasis Clipper/DOS untuk bisnis
+**distribusi barang** (grosir/distributor ke toko-toko, dengan barang
+dari beberapa prinsipal/supplier). Alur bisnis intinya:
+
+```
+PRINSIPAL (supplier)  →  GUDANG KITA  →  TOKO (pelanggan)
+      │                      │                  │
+   Order/Beli            Simpan Stok        Jual/Piutang
+```
+
+Aplikasi berjalan di browser (Chrome/Edge/Firefox), diakses lewat jaringan
+lokal kantor atau internet (tergantung cara hosting-nya). Tampilannya ada
+2 pilihan tema — **Klasik** (mirip layar DOS biru-kuning, buat yang
+terbiasa sistem lama) dan **Modern** (tampilan masa kini) — bisa
+di-switch kapan saja lewat tombol di pojok kanan atas, tidak memengaruhi
+data.
+
+---
+
+## 2. Peran & Level Akses
+
+Setiap user punya **Level 1–4**. Semakin kecil angkanya, semakin besar
+wewenangnya:
+
+| Level | Sebutan | Bisa apa |
+|---|---|---|
+| **1** | Admin | Semua akses, termasuk Users Maintenance, Backup Data |
+| **2** | Supervisor Senior | Semua Level 3 + Log Aktivitas, Notifikasi WhatsApp |
+| **3** | Supervisor | Boleh **hapus** data, approve Stok Opname, override blokir limit kredit |
+| **4** | Staf/Operator | Boleh **entry & ubah** data transaksi, tidak boleh hapus |
+
+**Prinsip yang dipakai:** dari eksplorasi sistem Clipper lama, ternyata
+hak akses aslinya jauh lebih granular (per-user per-layar, ~242 layar
+berbeda). Kami sengaja **tidak meniru itu** — sistem 4-level ini jauh
+lebih gampang dirawat untuk aplikasi yang terus berkembang seperti ini,
+dan pola pemberian akses di data lama pun sebenarnya membentuk gerombolan
+tingkatan (bukan benar-benar acak). Lihat README bagian batch terakhir
+untuk detail pertimbangannya.
+
+---
+
+## 3. Setup Awal (dilakukan SEKALI sebelum mulai pakai)
+
+Urutan ini penting — beberapa data saling bergantung.
+
+### 3.1 Instalasi Teknis
+1. Siapkan MySQL, jalankan `db/schema.sql` (struktur tabel)
+2. **Kalau punya backup DBF Clipper lama**: jalankan `db/convert_dbf_to_sql.py`
+   (data master) dan `db/convert_histori_harga.py` (histori harga/HPP,
+   opsional tapi disarankan — bikin Laporan Laba Kotor jauh lebih akurat)
+3. Copy `.env.example` jadi `.env`, isi koneksi database
+4. `npm install`, lalu `node server.js`
+5. Buka browser ke alamat servernya — kalau belum ada user sama sekali,
+   otomatis diarahkan ke halaman **Setup** untuk buat akun Admin pertama
+
+### 3.2 Isi Data Referensi (Master → submenu "Referensi")
+Isi berurutan (yang belakangan sering butuh yang sebelumnya sebagai
+pilihan dropdown):
+1. **Gudang** — minimal 1 gudang aktif
+2. **Group Barang**, **Divisi**, **Satuan** — pengelompokan barang
+3. **Prinsipal** — daftar supplier/prinsipal
+4. **Jenis Toko**, **Segment Toko**, **Daerah/Area** — pengelompokan toko
+
+### 3.3 Isi Data Master Inti
+1. **Master → Barang** — daftarkan barang, isi `stok_minimum` kalau mau
+   dipakai fitur peringatan Stok Kritis di Beranda
+2. **Master → Toko** — daftarkan toko pelanggan, isi **No. HP/WhatsApp**
+   kalau mau pakai reminder tagihan otomatis, isi **Plafon Nota** &
+   **Plafon Kredit** kalau mau pakai fitur blokir limit kredit
+3. **Master → Salesman** — daftarkan salesman
+4. **Barang → Harga 3 Level** (di halaman edit tiap barang) — set harga
+   jual T.O / Kanvas / Motoris per barang
+5. **Barang → Barcode** (opsional) — daftarkan barcode kemasan
+   karton & pcs kalau gudang pakai scanner
+
+### 3.4 Users & Hak Akses
+1. **Utility → Users Maintenance** — buat akun untuk tiap staf, tentukan
+   Level 1–4 sesuai peran (lihat tabel di bagian 2)
+2. **Utility → Notifikasi WhatsApp** (opsional) — isi `.env`
+   (`API_URL_WA`, `WA_NOMOR_OWNER`, dll), set `WA_NOTIFIKASI_AKTIF=true`
+   kalau gateway WA sudah siap, lalu kirim 1 pesan tes dari halaman ini
+
+### 3.5 Saldo Awal (kalau migrasi dari sistem lama)
+- **Gudang → Nota Kredit Awal** — masukkan saldo piutang/CN toko yang
+  masih outstanding dari sistem lama, supaya Laporan Piutang & Monitoring
+  Tagihan langsung akurat sejak hari pertama pakai sistem baru
+- Stok awal per barang per gudang bisa dimasukkan lewat **Stok Opname**
+  (buat opname pertama, isi Qty Fisik sesuai stok riil gudang)
+
+---
+
+## 4. Alur Kerja Harian — Order sampai Bayar (Order-to-Cash)
+
+Ini alur paling sering dipakai sehari-hari.
+
+```
+Toko pesan barang
+      ↓
+[Transaksi → Pesanan dari Toko]   ← opsional, kalau pesanan formal (PO)
+      ↓
+[Transaksi → Nota Penjualan]      ← WAJIB, ini yang bikin piutang & keluar stok
+      ↓ (kalau ada limit kredit/plafon terlampaui → perlu approval Supervisor)
+      ↓
+Barang dikirim, Nota dicetak (PDF)
+      ↓
+[Piutang → Pembayaran]            ← saat toko bayar (tunai/transfer/giro)
+      ↓
+Piutang lunas, otomatis hilang dari Monitoring Tagihan & blokir kredit
+```
+
+**Detail tiap langkah:**
+
+- **Pesanan dari Toko** *(opsional tapi disarankan untuk pesanan besar)* —
+  catat dulu apa yang dipesan toko. Nota Penjualan nanti bisa
+  disambungkan ke pesanan ini lewat kolom "No. Pesanan (PO)" — sistem
+  otomatis tahu berapa yang sudah terkirim vs sisa, dan pesanan boleh
+  dipenuhi bertahap lewat beberapa Nota.
+- **Nota Penjualan** — inti dari penjualan. Pilih Toko, tambah baris
+  barang (bisa **scan barcode**, bisa pilih satuan Karton/Pcs, harga
+  otomatis terisi sesuai Level Harga toko itu). Begitu toko dipilih,
+  sistem otomatis cek apakah toko ini **diblokir** (piutang overdue atau
+  lewat plafon kredit) — kalau diblokir, cuma Supervisor (Level ≤3) yang
+  bisa override dengan centang konfirmasi (tercatat ke Log Aktivitas).
+  Kalau ada barang bonus, dicatat terpisah supaya tidak kena PPN, dan
+  otomatis ikut mengurangi stok gudang.
+- **Cetak Nota/Faktur Pajak** — tombol cetak PDF ada di halaman Nota.
+- **Pembayaran** — dicatat di menu Piutang, bisa cicil/sebagian. Begitu
+  lunas, otomatis tidak muncul lagi di Monitoring Tagihan.
+
+---
+
+## 5. Alur Kerja — Pengadaan Barang (Procure-to-Stock)
+
+```
+Butuh restok barang dari prinsipal
+      ↓
+[Gudang → Surat Pesanan (PO)]     ← order ke prinsipal
+      ↓
+Barang datang dari prinsipal
+      ↓
+[Gudang → Penerimaan Barang]      ← WAJIB dicocokkan ke Surat Pesanan
+      ↓
+Stok otomatis bertambah di Kartu Stok
+```
+
+Penerimaan Barang **wajib** merujuk ke Surat Pesanan yang sudah dibuat
+(validasi otomatis, barang yang diterima harus ada di PO-nya) — ini
+mencegah barang masuk tanpa jejak pemesanan resminya.
+
+---
+
+## 6. Alur Kerja — Manajemen Gudang & Stok
+
+Dipakai berkala (mingguan/bulanan), bukan tiap hari:
+
+- **Pengambilan/Transfer** — pindah stok antar gudang (kalau ada lebih
+  dari 1 gudang)
+- **Retur Toko / CN** — toko mengembalikan barang, otomatis jadi Nota
+  Kredit (CN) yang mengurangi piutang toko itu
+- **Retur ke Prinsipal** — barang dikembalikan ke prinsipal (rusak/mati)
+- **Stok Opname** — hitung fisik stok gudang, dibandingkan ke sistem.
+  Alur approval 2 tahap: **DRAFT** (bebas diedit, belum sentuh Kartu
+  Stok) → **Finalisasi** (Level ≤3, baru saat ini selisihnya tercatat
+  permanen). Bisa isi manual satu-satu, scan barcode, atau **import
+  massal lewat Excel** (unduh template, isi di Excel, upload lagi) —
+  cocok untuk hitung stok gudang penuh.
+- **Kartu Stok** (di menu Saldo Stok) — lihat riwayat keluar-masuk tiap
+  barang per gudang, sumber kebenaran (source of truth) untuk semua
+  angka stok di aplikasi ini.
+
+---
+
+## 7. Alur Kerja — Penagihan & Manajemen Kredit
+
+Ini area yang paling berhubungan dengan arus kas bisnis:
+
+1. **Beranda** — sekilas pandang tiap login: Omzet Hari Ini/Bulan Ini,
+   Piutang Overdue, Stok Kritis, Top 5 Toko
+2. **Laporan → Monitoring Tagihan** — daftar per-nota yang jatuh tempo
+   hari ini / sudah lewat tempo, dengan filter Toko/Salesman
+3. **Notifikasi WhatsApp otomatis** (kalau diaktifkan) — tiap hari jam
+   yang diatur di `.env`:
+   - Reminder ke toko yang overdue (otomatis, ke No. HP di Master Toko)
+   - Rekap penjualan harian ke Owner
+   - Alert stok kritis ke bagian Pembelian
+4. **Blokir otomatis** — toko yang overdue atau lewat plafon kredit tidak
+   bisa dibuatkan Nota baru **kecuali** di-override Supervisor. Ini
+   mencegah piutang toko yang sudah bermasalah terus membengkak tanpa
+   sepengetahuan atasan.
+
+---
+
+## 8. Alur Kerja — Laporan & Analisa
+
+Semua di menu **Laporan**:
+
+| Laporan | Kegunaan |
+|---|---|
+| Laporan Penjualan | Rekap jual per toko/salesman/barang |
+| Laba Kotor | Margin per Barang/Toko/Salesman/Prinsipal — pakai histori HPP asli kalau tersedia |
+| Rugi Laba Sederhana | Laba Kotor dikurangi Biaya Operasional (bukan pembukuan resmi) |
+| Umur Piutang | Aging piutang per toko (bucket 0-30/31-60/61-90/90+ hari) |
+| Monitoring Tagihan | Detail per-nota jatuh tempo (lihat bagian 7) |
+| Laporan Stok | Posisi stok per barang per gudang |
+| Laporan Retur | Rekap retur toko & retur prinsipal |
+| Analisa Budget Barang | Realisasi vs target budget per barang |
+| Analisa Penjualan Salesman | Kinerja tiap salesman |
+| Deviasi Omzet | Salesman dengan pola retur mencurigakan |
+| Ekspor Data Pajak | Siapkan data buat pelaporan Coretax (bukan file impor resmi, cuma bantu susun) |
+
+---
+
+## 9. Alur Kerja — Admin & Utility (berkala)
+
+- **Biaya Operasional** — catat pengeluaran rutin (gaji, sewa, dll),
+  jadi pengurang di Laporan Rugi Laba Sederhana
+- **Backup Data** *(Admin only)* — unduh backup `.sql` sebelum operasi
+  berisiko (import massal, dll). **Lakukan rutin**, simpan di tempat
+  terpisah dari server
+- **Log Aktivitas** *(Level ≤2)* — audit siapa login/simpan/hapus apa,
+  termasuk override limit kredit
+- **Riwayat Perubahan Harga** (di halaman edit tiap Barang) — jejak
+  siapa mengubah harga, kapan, dari berapa ke berapa
+- **Import/Export Excel Massal** — update harga banyak barang sekaligus
+  (Master Barang → Import/Export Harga)
+
+---
+
+## 10. Ringkasan Siklus Waktu
+
+| Frekuensi | Aktivitas |
+|---|---|
+| **Tiap transaksi** | Nota Penjualan, Pembayaran, Penerimaan Barang |
+| **Harian** | Cek Beranda, proses Pesanan dari Toko baru, notifikasi WA otomatis jalan sendiri |
+| **Mingguan** | Pengambilan/Transfer antar gudang (kalau perlu), review Monitoring Tagihan |
+| **Bulanan** | Stok Opname per gudang, Laporan Laba Kotor & Rugi Laba, catat Biaya Operasional |
+| **Sebelum operasi berisiko** | Backup Data manual |
+| **Sesekali/insidental** | Retur Toko/Prinsipal, Nota Kredit Awal (cuma saat migrasi) |
+
+---
+
+## 11. Peta Menu Lengkap
+
+```
+Beranda                          (dashboard KPI)
+
+Master
+ ├─ Barang, Toko, Salesman
+ ├─ Budget Barang, Target Salesman
+ └─ Referensi: Group Barang, Divisi, Jenis Toko, Segment Toko,
+               Daerah/Area, Satuan, Gudang, Prinsipal
+
+Transaksi
+ ├─ Nota Penjualan
+ └─ Pesanan dari Toko
+
+Piutang
+ └─ Pembayaran
+
+Gudang
+ ├─ Saldo Stok (Kartu Stok)
+ ├─ Surat Pesanan (PO ke Prinsipal)
+ ├─ Penerimaan Barang
+ ├─ Pengambilan / Transfer
+ ├─ Retur Toko / CN
+ ├─ Retur ke Prinsipal
+ ├─ Nota Kredit Awal
+ └─ Stok Opname
+
+Laporan
+ └─ (lihat tabel bagian 8)
+
+Utility
+ ├─ Profil Perusahaan
+ ├─ Users Maintenance          (Level 1)
+ ├─ Biaya Operasional
+ ├─ Backup Data                (Level 1)
+ ├─ Log Aktivitas              (Level ≤2)
+ └─ Notifikasi WhatsApp        (Level ≤2)
+```
+
+---
+
+## 12. Batasan yang Perlu Diketahui
+
+Ringkas — detail lengkap tiap poin ada di `README.md`:
+
+- **Bukan aplikasi akuntansi resmi** — tidak ada jurnal/neraca/buku besar
+  berpasangan. Rugi Laba Sederhana cuma Laba Kotor dikurangi Biaya
+  Operasional manual, untuk laporan resmi tetap perlu akuntan
+- **Ekspor Pajak** cuma bantu susun data, bukan file impor resmi Coretax
+- **Hak akses** 4-level (bukan granular per-layar seperti sistem lama) —
+  keputusan sadar, lihat bagian 2
+- **Laba Kotor** akurasinya tergantung cakupan histori HPP yang
+  ter-import — ditampilkan transparan persentase cakupannya di halaman
+  laporan itu sendiri
+- **Restore backup** sengaja tidak ada tombolnya di web (terlalu
+  berisiko) — lewat command line manual, lihat halaman Backup Data
+- Semua penyederhanaan lain didokumentasikan di `README.md` per fitur,
+  dengan alasan kenapa dan cara memperluasnya kalau suatu saat dibutuhkan
+
+---
+
+*Dokumen ini dibuat berdasarkan kondisi aplikasi saat ini (39 batch
+pengembangan). Kalau ada modul baru ditambahkan, roadmap ini perlu
+di-update mengikuti.*
