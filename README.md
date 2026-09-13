@@ -75,10 +75,19 @@ pilihan dropdown):
 
 ### 3.3 Isi Data Master Inti
 1. **Master → Barang** — daftarkan barang, isi `stok_minimum` kalau mau
-   dipakai fitur peringatan Stok Kritis di Beranda
+   dipakai fitur peringatan Stok Kritis di Beranda. Ada juga
+   **Import/Export Excel** buat update harga banyak barang sekaligus
+   (lihat bagian 10). Kalau barang tertentu punya 3 tingkat satuan (mis.
+   Karton → Lusin → Pcs, bukan cuma Karton → Pcs), isi **Satuan Sedang**
+   di halaman edit barang itu (opsional, boleh dikosongkan kalau cuma
+   2 tingkat seperti biasa).
 2. **Master → Toko** — daftarkan toko pelanggan, isi **No. HP/WhatsApp**
    kalau mau pakai reminder tagihan otomatis, isi **Plafon Nota** &
-   **Plafon Kredit** kalau mau pakai fitur blokir limit kredit
+   **Plafon Kredit** kalau mau pakai fitur blokir limit kredit. Kalau
+   jumlah tokonya banyak, pakai **Import/Export Excel** di halaman
+   Master Toko (unduh template, isi/edit di Excel, upload lagi) daripada
+   input satu-satu — kode toko yang sudah ada otomatis di-update, kode
+   baru otomatis ditambahkan.
 3. **Master → Salesman** — daftarkan salesman
 4. **Barang → Harga 3 Level** (di halaman edit tiap barang) — set harga
    jual T.O / Kanvas / Motoris per barang
@@ -88,7 +97,12 @@ pilihan dropdown):
 ### 3.4 Users & Hak Akses
 1. **Utility → Users Maintenance** — buat akun untuk tiap staf, tentukan
    Level 1–4 sesuai peran (lihat tabel di bagian 2)
-2. **Utility → Notifikasi WhatsApp** (opsional) — isi `.env`
+2. **Utility → Profil Perusahaan** — isi data perusahaan (nama, alamat,
+   NPWP, dll, dipakai di kop cetakan Nota/Faktur Pajak), termasuk
+   **Tarif PPN** yang berlaku saat ini (default 11%, bisa diedit kalau
+   aturan pajak berubah di kemudian hari — lihat catatan penting di
+   bagian 13 soal ini)
+3. **Utility → Notifikasi WhatsApp** (opsional) — isi `.env`
    (`API_URL_WA`, `WA_NOMOR_OWNER`, dll), set `WA_NOTIFIKASI_AKTIF=true`
    kalau gateway WA sudah siap, lalu kirim 1 pesan tes dari halaman ini
 
@@ -141,7 +155,80 @@ Piutang lunas, otomatis hilang dari Monitoring Tagihan & blokir kredit
 
 ---
 
-## 5. Alur Kerja — Pengadaan Barang (Procure-to-Stock)
+## 5. Alur Kerja — Import Massal dari Matrix (SFA)
+
+Kalau tim sales lapangan pakai **Matrix** (aplikasi Sales Force
+Automation pihak ketiga) untuk mencatat kunjungan & transaksi langsung
+dari HP/tablet, fitur ini menyambungkan otomatis data dari Matrix ke
+sistem distribusi ini — jadi **tidak perlu input ulang manual** satu
+per satu dari laporan Matrix.
+
+### 5.1 Apa yang terjadi kalau fitur ini dipakai
+
+Sistem membaca 1 file laporan dari Matrix (isinya bisa ribuan baris
+transaksi), mengelompokkan per faktur, lalu **otomatis membuat Nota
+Penjualan dan/atau Retur Toko** — lengkap dengan barang, qty, harga,
+dan diskonnya — persis seperti kalau diinput manual lewat form biasa.
+
+### 5.2 Persiapan SEKALI DI AWAL (sebelum pertama kali import)
+
+Urutan ini penting, dan cuma perlu dilakukan sekali (kecuali ada toko
+atau barang baru dari Matrix yang belum terdaftar):
+
+1. **Master Toko harus sudah lengkap** — kode toko yang dipakai HARUS
+   SAMA dengan "No Outlet" di Matrix. Cara tercepat: export data toko
+   dari Matrix ke Excel, sesuaikan formatnya seperti template Master
+   Toko kita (lihat bagian 3.3), lalu upload lewat **Master → Toko →
+   Import/Export Excel**.
+2. **Pemetaan Barang Matrix** — kode barang di Matrix beda penomoran
+   dari kode barang kita, jadi perlu "kamus penerjemah" dulu. Buka
+   **Utility → Import dari Matrix → Pemetaan Barang Matrix**, lalu
+   daftarkan tiap kode barang Matrix (Pcode) ke kode barang kita yang
+   sesuai. Barang yang belum dipetakan akan GAGAL diimpor (cuma baris
+   itu yang gagal, bukan seluruh transaksinya batal) — sistem akan
+   kasih tahu persis kode mana yang belum dipetakan.
+3. **Salesman TIDAK perlu disiapkan manual** — kalau kode salesman dari
+   Matrix belum terdaftar di Master Salesman, sistem otomatis
+   membuatkan (nanti tinggal lengkapi datanya kalau perlu, mis. alamat).
+
+### 5.3 Cara Import (rutin, tiap ada laporan baru dari Matrix)
+
+1. Minta/export file laporan transaksi dari Matrix (format `.txt`)
+2. Buka **Utility → Import dari Matrix**
+3. Upload file-nya, lalu pilih:
+   - **Gudang Tujuan** — gudang mana yang stoknya dikurangi/ditambah
+     akibat transaksi-transaksi ini
+   - **Satuan Qty di File** — defaultnya "Satuan Kecil/Pcs", ganti ke
+     "Satuan Besar/Karton" kalau ternyata data dari Matrix dicatat
+     dalam Karton bukan Pcs (tanya tim yang urus Matrix kalau tidak
+     yakin)
+4. Klik **Import**, tunggu prosesnya selesai
+5. Cek hasilnya:
+   - **Berhasil** — jumlah Nota/Retur yang berhasil dibuat
+   - **Dilewati** — transaksi yang SUDAH PERNAH diimpor sebelumnya
+     (sistem otomatis mendeteksi ini, jadi upload file yang sama 2x
+     TIDAK akan bikin data dobel)
+   - **Gagal** — transaksi yang belum bisa diimpor, beserta alasannya
+     per baris (paling sering: toko belum ada di Master Toko, atau
+     barang belum dipetakan) — perbaiki penyebabnya, lalu upload ulang
+     file yang sama (yang sudah berhasil otomatis dilewati, cuma yang
+     gagal kemarin yang akan diproses ulang)
+
+### 5.4 Yang perlu diketahui (supaya tidak salah paham)
+
+- Nota/Retur hasil import bisa dibuka & diedit seperti Nota biasa kalau
+  memang perlu dikoreksi manual
+- Cek limit kredit/plafon toko **tidak berlaku** untuk transaksi hasil
+  import (karena ini transaksi yang sudah benar-benar terjadi di masa
+  lalu, bukan keputusan kredit baru yang perlu di-approve)
+- Field tertentu di data Matrix (kode "KG" dan "XQTYPCS") saat ini
+  **tidak dipakai** dalam perhitungan apapun — kalau ke depannya
+  ternyata field itu penting untuk bisnis, perlu didiskusikan ulang
+  cara pakainya
+
+---
+
+## 6. Alur Kerja — Pengadaan Barang (Procure-to-Stock)
 
 ```
 Butuh restok barang dari prinsipal
@@ -161,14 +248,19 @@ mencegah barang masuk tanpa jejak pemesanan resminya.
 
 ---
 
-## 6. Alur Kerja — Manajemen Gudang & Stok
+## 7. Alur Kerja — Manajemen Gudang & Stok
 
 Dipakai berkala (mingguan/bulanan), bukan tiap hari:
 
 - **Pengambilan/Transfer** — pindah stok antar gudang (kalau ada lebih
   dari 1 gudang)
 - **Retur Toko / CN** — toko mengembalikan barang, otomatis jadi Nota
-  Kredit (CN) yang mengurangi piutang toko itu
+  Kredit (CN) yang mengurangi piutang toko itu. Kalau Retur ditautkan ke
+  Nomor Nota Penjualan aslinya (field "Nomor Nota Asli"), dan Nota
+  aslinya ada diskon, harga & diskon di baris Retur bisa **otomatis
+  ke-isi sama persis** dengan Nota asli begitu barangnya dipilih (tetap
+  bisa diubah manual kalau memang mau beda) — supaya nilai kredit yang
+  diberikan konsisten dengan yang benar-benar pernah dijual.
 - **Retur ke Prinsipal** — barang dikembalikan ke prinsipal (rusak/mati)
 - **Stok Opname** — hitung fisik stok gudang, dibandingkan ke sistem.
   Alur approval 2 tahap: **DRAFT** (bebas diedit, belum sentuh Kartu
@@ -182,7 +274,7 @@ Dipakai berkala (mingguan/bulanan), bukan tiap hari:
 
 ---
 
-## 7. Alur Kerja — Penagihan & Manajemen Kredit
+## 8. Alur Kerja — Penagihan & Manajemen Kredit
 
 Ini area yang paling berhubungan dengan arus kas bisnis:
 
@@ -202,7 +294,7 @@ Ini area yang paling berhubungan dengan arus kas bisnis:
 
 ---
 
-## 8. Alur Kerja — Laporan & Analisa
+## 9. Alur Kerja — Laporan & Analisa
 
 Semua di menu **Laporan**:
 
@@ -212,7 +304,7 @@ Semua di menu **Laporan**:
 | Laba Kotor | Margin per Barang/Toko/Salesman/Prinsipal — pakai histori HPP asli kalau tersedia |
 | Rugi Laba Sederhana | Laba Kotor dikurangi Biaya Operasional (bukan pembukuan resmi) |
 | Umur Piutang | Aging piutang per toko (bucket 0-30/31-60/61-90/90+ hari) |
-| Monitoring Tagihan | Detail per-nota jatuh tempo (lihat bagian 7) |
+| Monitoring Tagihan | Detail per-nota jatuh tempo (lihat bagian 8) |
 | Laporan Stok | Posisi stok per barang per gudang |
 | Laporan Retur | Rekap retur toko & retur prinsipal |
 | Analisa Budget Barang | Realisasi vs target budget per barang |
@@ -222,7 +314,7 @@ Semua di menu **Laporan**:
 
 ---
 
-## 9. Alur Kerja — Admin & Utility (berkala)
+## 10. Alur Kerja — Admin & Utility (berkala)
 
 - **Biaya Operasional** — catat pengeluaran rutin (gaji, sewa, dll),
   jadi pengurang di Laporan Rugi Laba Sederhana
@@ -234,24 +326,28 @@ Semua di menu **Laporan**:
 - **Riwayat Perubahan Harga** (di halaman edit tiap Barang) — jejak
   siapa mengubah harga, kapan, dari berapa ke berapa
 - **Import/Export Excel Massal** — update harga banyak barang sekaligus
-  (Master Barang → Import/Export Harga)
+  (Master Barang → Import/Export Harga), atau update data toko massal
+  (Master Toko → Import/Export Excel)
+- **Import dari Matrix** *(Level ≤3)* — lihat bagian 5 utk panduan
+  lengkap. Halaman **Pemetaan Barang Matrix** (kelola kode barang
+  Matrix ↔ kode barang kita) juga ada di menu ini.
 
 ---
 
-## 10. Ringkasan Siklus Waktu
+## 11. Ringkasan Siklus Waktu
 
 | Frekuensi | Aktivitas |
 |---|---|
 | **Tiap transaksi** | Nota Penjualan, Pembayaran, Penerimaan Barang |
-| **Harian** | Cek Beranda, proses Pesanan dari Toko baru, notifikasi WA otomatis jalan sendiri |
-| **Mingguan** | Pengambilan/Transfer antar gudang (kalau perlu), review Monitoring Tagihan |
+| **Harian** | Cek Beranda, proses Pesanan dari Toko baru, notifikasi WA otomatis jalan sendiri, import laporan Matrix (kalau tim sales pakai Matrix & laporannya harian) |
+| **Mingguan** | Pengambilan/Transfer antar gudang (kalau perlu), review Monitoring Tagihan, import Matrix (kalau laporannya mingguan) |
 | **Bulanan** | Stok Opname per gudang, Laporan Laba Kotor & Rugi Laba, catat Biaya Operasional |
 | **Sebelum operasi berisiko** | Backup Data manual |
 | **Sesekali/insidental** | Retur Toko/Prinsipal, Nota Kredit Awal (cuma saat migrasi) |
 
 ---
 
-## 11. Peta Menu Lengkap
+## 12. Peta Menu Lengkap
 
 ```
 Beranda                          (dashboard KPI)
@@ -280,20 +376,21 @@ Gudang
  └─ Stok Opname
 
 Laporan
- └─ (lihat tabel bagian 8)
+ └─ (lihat tabel bagian 9)
 
 Utility
- ├─ Profil Perusahaan
+ ├─ Profil Perusahaan          (termasuk Tarif PPN)
  ├─ Users Maintenance          (Level 1)
  ├─ Biaya Operasional
  ├─ Backup Data                (Level 1)
  ├─ Log Aktivitas              (Level ≤2)
- └─ Notifikasi WhatsApp        (Level ≤2)
+ ├─ Notifikasi WhatsApp        (Level ≤2)
+ └─ Import dari Matrix         (Level ≤3, termasuk Pemetaan Barang Matrix)
 ```
 
 ---
 
-## 12. Batasan yang Perlu Diketahui
+## 13. Batasan yang Perlu Diketahui
 
 Ringkas — detail lengkap tiap poin ada di `README.md`:
 
@@ -308,11 +405,21 @@ Ringkas — detail lengkap tiap poin ada di `README.md`:
   laporan itu sendiri
 - **Restore backup** sengaja tidak ada tombolnya di web (terlalu
   berisiko) — lewat command line manual, lihat halaman Backup Data
+- **Tarif PPN** yang berlaku dikunci per Nota saat Nota itu pertama
+  dibuat — kalau tarif default diubah di kemudian hari (mis. aturan
+  pajak berubah), Nota-nota LAMA tidak ikut berubah, tetap konsisten
+  dengan tarif yang berlaku waktu Nota itu dibuat
+- **Import dari Matrix**: beberapa field di data Matrix (kode "KG" dan
+  "XQTYPCS") maknanya belum bisa dipastikan sampai saat ini, jadi
+  sengaja tidak dipakai dalam perhitungan apapun. Satuan qty (Karton
+  atau Pcs) di file Matrix perlu dipilih manual tiap kali import (satu
+  pilihan berlaku untuk seluruh file yang diupload)
 - Semua penyederhanaan lain didokumentasikan di `README.md` per fitur,
   dengan alasan kenapa dan cara memperluasnya kalau suatu saat dibutuhkan
 
 ---
 
-*Dokumen ini dibuat berdasarkan kondisi aplikasi saat ini (39 batch
-pengembangan). Kalau ada modul baru ditambahkan, roadmap ini perlu
-di-update mengikuti.*
+*Dokumen ini dibuat berdasarkan kondisi aplikasi saat ini (47 batch
+pengembangan, terakhir diupdate setelah fitur Satuan Sedang, Tarif PPN
+Configurable, Diskon di Retur Toko, dan Import dari Matrix ditambahkan).
+Kalau ada modul baru ditambahkan, roadmap ini perlu di-update mengikuti.*
