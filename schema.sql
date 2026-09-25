@@ -118,7 +118,7 @@ CREATE TABLE IF NOT EXISTS ag_segment_toko (
 -- AgMsToko -> ag_toko : master toko / pelanggan
 -- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS ag_toko (
-  kode_toko       VARCHAR(6)  NOT NULL COMMENT 'Nomor_Toko',
+  kode_toko       VARCHAR(10) NOT NULL COMMENT 'Nomor_Toko -- diperlebar dari 6 ke 10 (batch 47) utk muat No Outlet 7 digit dari Matrix SFA',
   nama_toko       VARCHAR(25) NOT NULL COMMENT 'Nama_Tok',
   pemilik         VARCHAR(25) NULL     COMMENT 'Milik_Tok',
   alamat1         VARCHAR(30) NULL     COMMENT 'Almt1_Tok',
@@ -127,7 +127,8 @@ CREATE TABLE IF NOT EXISTS ag_toko (
   nota_putih_dibatasi TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Btshr_Tok (Y/T)',
   kode_area       VARCHAR(6)  NULL     COMMENT 'Area_Tok -> ag_area',
   kode_segment    VARCHAR(6)  NULL     COMMENT 'SeTk_Tok -> ag_segment_toko',
-  npwp            VARCHAR(20) NULL     COMMENT 'NPWP_Tok',
+  npwp            VARCHAR(20) NULL     COMMENT 'NPWP_Tok -- kalau toko sudah terdaftar PKP asli. KOSONGKAN kalau ternyata cuma NIK yang dulu ditaruh di sini (lihat kolom nik di bawah)',
+  nik             VARCHAR(16) NULL     COMMENT 'BARU (batch 55, bukan field asli DOS) -- NIK pemilik toko, dipakai Jembatan Coretax utk toko yang BELUM PKP (npwp kosong). Beda dari npwp -- npwp = benar2 terdaftar Pengusaha Kena Pajak, nik = identitas pribadi biasa',
   nama_faktur     VARCHAR(50) NULL     COMMENT 'NamaX_Tok',
   alamat_faktur1  VARCHAR(60) NULL     COMMENT 'Alax_Tok',
   alamat_faktur2  VARCHAR(60) NULL     COMMENT 'Alax2_Tok',
@@ -159,6 +160,8 @@ CREATE TABLE IF NOT EXISTS ag_barang (
   kode_unit2     VARCHAR(6)  NULL     COMMENT 'Unit2_Stk - satuan II (misal PCS)',
   isi_unit1      DECIMAL(12,2) NOT NULL DEFAULT 0 COMMENT 'Isi_Stk - isi /karton',
   isi_unit2      DECIMAL(12,2) NOT NULL DEFAULT 0 COMMENT 'Isi2_Stk - isi II -> I',
+  kode_unit3     VARCHAR(6)  NULL     COMMENT 'BARU (bukan field asli DOS) - Satuan Sedang, misal LUSIN/DUS, opsional per barang',
+  isi_unit3      DECIMAL(12,2) NOT NULL DEFAULT 0 COMMENT 'BARU - isi satuan KECIL (unit2/Pcs) per 1 satuan SEDANG (unit3), dipakai konversi ke Karton lewat isi_unit1',
   kode_divisi    VARCHAR(3)  NULL     COMMENT 'Div_Stk -> ag_divisi',
   kode_tabel_harga VARCHAR(6) NULL    COMMENT 'TbHrg_Stok - dipakai lookup harga & diskon',
   harga_beli     DECIMAL(15,2) NOT NULL DEFAULT 0 COMMENT 'HrgBl_Stok',
@@ -192,20 +195,23 @@ CREATE TABLE IF NOT EXISTS ag_fkt_h (
   nomor_fkt     VARCHAR(10) NOT NULL COMMENT 'Nomor_FktH (PK asli)',
   tgl_fkt       DATE NOT NULL         COMMENT 'Tgl_FktH',
   no_po         VARCHAR(10) NULL      COMMENT 'PO_FktH - nomor pesanan pembeli',
-  kode_toko     VARCHAR(6) NOT NULL   COMMENT 'Toko_FktH',
+  kode_toko     VARCHAR(10) NOT NULL  COMMENT 'Toko_FktH -- diperlebar bareng ag_toko.kode_toko, lihat komentarnya',
   tgl_srj       DATE NULL             COMMENT 'TgSrj_FktH - tanggal surat jalan',
   no_srj        VARCHAR(10) NULL      COMMENT 'NoSrj_FktH - nomor surat jalan',
   tempo_hari    SMALLINT NOT NULL DEFAULT 0 COMMENT 'Due_FktH - tempo bayar (hari)',
-  jenis_ppn     CHAR(1) NOT NULL DEFAULT '1' COMMENT 'Disc_FktH - 1/2 sesuai jenis PPN lama',
+  jenis_ppn     CHAR(1) NOT NULL DEFAULT '1' COMMENT 'Disc_FktH - 1=PPN Standar, 2=Non-PPN/Dibebaskan',
+  tarif_ppn_pct DECIMAL(5,2) NOT NULL DEFAULT 11.00 COMMENT 'BARU (bukan field asli DOS) - tarif PPN (%) yg berlaku SAAT Nota ini dibuat, DIKUNCI permanen (diambil dari ag_pengaturan.tarif_ppn_pct sekali pas Nota pertama kali disimpan) -- supaya Nota lama tidak ikut berubah kalau tarif default diubah di kemudian hari',
   kode_sman     VARCHAR(6) NULL       COMMENT 'SlMan_FktH',
   total_jual    DECIMAL(15,2) NOT NULL DEFAULT 0 COMMENT 'Jual_FktH - total termasuk PPN',
   total_bayar   DECIMAL(15,2) NOT NULL DEFAULT 0 COMMENT 'Bayar_FktH',
   group_prin    VARCHAR(6) NULL       COMMENT 'GPrin_FktH',
   nota_salesman TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Sales_FktH',
   batal         TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Batal_FktH',
+  referensi_import VARCHAR(30) NULL COMMENT 'BARU (batch 47) - jejak sumber kalau Nota ini hasil import otomatis (mis. dari Matrix SFA), format "MATRIX:noOutlet-noFaktur" -- dipakai cegah import dobel, NULL utk Nota dibuat manual seperti biasa',
   created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (nomor_fkt),
+  UNIQUE KEY uq_fkth_referensi_import (referensi_import),
   KEY idx_toko (kode_toko),
   KEY idx_sman (kode_sman),
   KEY idx_tgl (tgl_fkt),
@@ -272,6 +278,34 @@ CREATE TABLE IF NOT EXISTS ag_pembayaran (
   KEY idx_nota (nomor_fkt),
   CONSTRAINT fk_bayar_fkt FOREIGN KEY (nomor_fkt) REFERENCES ag_fkt_h(nomor_fkt),
   CONSTRAINT fk_bayar_bank FOREIGN KEY (kode_bank) REFERENCES ag_bank(kode_bank)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------------------------------------------------------------
+-- BARU (batch 54, bukan tabel asli DOS) -- Pembayaran HUTANG ke
+-- Prinsipal, pola SAMA PERSIS dgn ag_pembayaran di atas (cuma kebalik
+-- arahnya: kita yang BAYAR ke prinsipal, bukan toko bayar ke kita), &
+-- nempel ke ag_lpb_h (Penerimaan Barang) -- itu yang jadi sumber
+-- hutang, sama spt ag_fkt_h jadi sumber piutang. TIDAK ada jenis_bayar
+-- 3 (Nota Kredit) krn belum ada mekanisme "retur mengurangi hutang
+-- otomatis" -- kalau nanti dibutuhkan, retur ke prinsipal bisa
+-- dicatat manual sbg pengurang lewat jenis Cash/Transfer biasa dulu.
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS ag_hutang_bayar (
+  id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  tgl_bayar      DATE NOT NULL,
+  nomor_lpb      VARCHAR(6) NOT NULL   COMMENT '-> ag_lpb_h (Penerimaan Barang), sumber hutangnya',
+  urutan         TINYINT NOT NULL DEFAULT 1,
+  nilai_bayar    DECIMAL(15,2) NOT NULL DEFAULT 0,
+  jenis_bayar    TINYINT NOT NULL DEFAULT 1 COMMENT '1=Cash/Transfer, 2=Giro',
+  kode_bank      VARCHAR(4) NULL,
+  no_giro        VARCHAR(15) NULL,
+  tgl_tempo_giro DATE NULL,
+  created_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_tgl_lpb_urut (tgl_bayar, nomor_lpb, urutan),
+  KEY idx_lpb (nomor_lpb),
+  CONSTRAINT fk_hutangbayar_lpb FOREIGN KEY (nomor_lpb) REFERENCES ag_lpb_h(nomor_lpb),
+  CONSTRAINT fk_hutangbayar_bank FOREIGN KEY (kode_bank) REFERENCES ag_bank(kode_bank)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- =====================================================================
@@ -429,7 +463,7 @@ CREATE TABLE IF NOT EXISTS ag_opname_d (
 CREATE TABLE IF NOT EXISTS ag_rin_h (
   nomor_rin       VARCHAR(10) NOT NULL COMMENT 'Nomor_RinH (dgn prefix CN)',
   tgl_rin         DATE NOT NULL        COMMENT 'Tgl_RinH',
-  kode_toko       VARCHAR(6) NOT NULL  COMMENT 'Toko_RinH',
+  kode_toko       VARCHAR(10) NOT NULL COMMENT 'Toko_RinH -- diperlebar bareng ag_toko.kode_toko, lihat komentarnya',
   jenis_harga     CHAR(1) NOT NULL DEFAULT '1' COMMENT 'Disc_RinH (1/2)',
   kode_gudang     VARCHAR(6) NULL      COMMENT 'Gudg_RinH - gudang tempat barang retur masuk (NULL untuk tipe SALDO_AWAL, karena tidak ada barang fisik yang gerak)',
   kode_sman       VARCHAR(6) NULL      COMMENT 'SlMan_RinH',
@@ -439,8 +473,10 @@ CREATE TABLE IF NOT EXISTS ag_rin_h (
   nilai           DECIMAL(15,2) NOT NULL DEFAULT 0 COMMENT 'Untuk tipe NORMAL: dihitung dari total detail. Untuk tipe SALDO_AWAL: diisi langsung manual (tidak ada baris barang).',
   tipe            ENUM('NORMAL','SALDO_AWAL') NOT NULL DEFAULT 'NORMAL' COMMENT 'SALDO_AWAL = dari AGE307.PRG "Nota Kredit Awal", entry saldo migrasi tanpa detail barang',
   batal           TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Batal_RinH',
+  referensi_import VARCHAR(30) NULL COMMENT 'BARU (batch 47) - sama seperti ag_fkt_h.referensi_import, cegah import dobel dari Matrix SFA',
   created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (nomor_rin),
+  UNIQUE KEY uq_rinh_referensi_import (referensi_import),
   KEY idx_toko (kode_toko),
   CONSTRAINT fk_rinh_toko FOREIGN KEY (kode_toko) REFERENCES ag_toko(kode_toko),
   CONSTRAINT fk_rinh_gudang FOREIGN KEY (kode_gudang) REFERENCES ag_gudang(kode_gudang),
@@ -453,7 +489,10 @@ CREATE TABLE IF NOT EXISTS ag_rin_d (
   kode_barang VARCHAR(8) NOT NULL   COMMENT 'NoStk_RinD',
   qty         DECIMAL(12,2) NOT NULL DEFAULT 0 COMMENT 'Qty_RinD',
   harga       DECIMAL(15,2) NOT NULL DEFAULT 0 COMMENT 'Harga_RinD',
-  subtotal    DECIMAL(15,2) NOT NULL DEFAULT 0 COMMENT 'qty x harga (disederhanakan, tanpa tingkatan diskon)',
+  diskon1       DECIMAL(5,2) NOT NULL DEFAULT 0 COMMENT 'BARU (bukan field asli DOS) - % diskon 1, spy retur bisa konsisten dgn Nota Penjualan asli yg ada diskon',
+  diskon2       DECIMAL(5,2) NOT NULL DEFAULT 0 COMMENT 'BARU - % diskon 2',
+  nilai_diskon2 DECIMAL(15,2) NOT NULL DEFAULT 0 COMMENT 'BARU - nilai rupiah diskon2 (referensi, hasil hitungan)',
+  subtotal    DECIMAL(15,2) NOT NULL DEFAULT 0 COMMENT 'qty x harga, dikurangi diskon1 & diskon2 kalau diisi (formula sama dgn ag_fkt_d, lihat config/hitungDiskon.js)',
   PRIMARY KEY (id),
   UNIQUE KEY uq_rin_barang (nomor_rin, kode_barang),
   CONSTRAINT fk_rind_header FOREIGN KEY (nomor_rin) REFERENCES ag_rin_h(nomor_rin) ON DELETE CASCADE,
@@ -516,6 +555,7 @@ CREATE TABLE IF NOT EXISTS ag_pengaturan (
   nomor_pkp        VARCHAR(40) NOT NULL DEFAULT '' COMMENT 'NPKP2_Ctl - Nomor Pengukuhan PKP',
   tanggal_pkp      DATE NULL COMMENT 'TPKP2_Ctl - Tanggal Pengukuhan PKP',
   penandatangan_pkp VARCHAR(60) NOT NULL DEFAULT '' COMMENT 'TdTg2_Ctl - nama penandatangan khusus Faktur Pajak',
+  tarif_ppn_pct    DECIMAL(5,2) NOT NULL DEFAULT 11.00 COMMENT 'BARU (bukan field asli DOS) - tarif PPN efektif skrg (%), bisa diubah kalau aturan pajak berubah. HANYA dipakai sbg DEFAULT utk Nota BARU -- Nota yang sudah ada kuncinya di ag_fkt_h.tarif_ppn_pct sendiri, tidak ikut berubah kalau ini diubah',
   PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -545,6 +585,22 @@ CREATE TABLE IF NOT EXISTS ag_user (
   aktif          TINYINT(1) NOT NULL DEFAULT 1,
   created_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (kode_user)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------------------------------------------------------------
+-- BARU (batch 49, bukan tabel asli DOS) -- shortcut menu di Beranda,
+-- PER USER (bukan global) -- tiap operator atur sendiri menu apa yang
+-- sering dia buka, tidak saling mempengaruhi user lain.
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS ag_shortcut_user (
+  id         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  kode_user  VARCHAR(8) NOT NULL,
+  path       VARCHAR(100) NOT NULL COMMENT 'path menu relatif, mis. "stok-opname" atau "referensi/gudang"',
+  label      VARCHAR(60) NOT NULL COMMENT 'teks yg ditampilkan di tombol shortcut (disalin dari katalog menu saat ditambahkan)',
+  urutan     INT NOT NULL DEFAULT 0,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_shortcut_user_path (kode_user, path),
+  CONSTRAINT fk_shortcut_user FOREIGN KEY (kode_user) REFERENCES ag_user(kode_user) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 SET FOREIGN_KEY_CHECKS = 1;
@@ -794,6 +850,25 @@ CREATE TABLE IF NOT EXISTS ag_barcode_barang (
   CONSTRAINT fk_barcode_barang FOREIGN KEY (kode_barang) REFERENCES ag_barang(kode_barang) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- ---------------------------------------------------------------------
+-- BARU (batch 47, bukan tabel asli DOS) -- pemetaan kode barang dari
+-- Matrix (SFA/Sales Force Automation pihak ke-3, lihat modul
+-- matrix-import) ke kode_barang internal kita. Pola SAMA PERSIS dgn
+-- ag_barcode_barang di atas (1 tabel kecil, UI daftarkan pemetaan per
+-- barang, lookup pas import) -- prinsip #1 hand-off, reuse pola yg
+-- sudah ada, bukan bikin struktur baru.
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS ag_pemetaan_barang_matrix (
+  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  kode_matrix VARCHAR(20) NOT NULL COMMENT 'Pcode dari Matrix',
+  kode_barang VARCHAR(8) NOT NULL COMMENT 'Kode barang internal yg sesuai',
+  nama_matrix VARCHAR(100) NULL COMMENT 'Nama Produk dari Matrix -- cuma referensi biar gampang dicocokkan manual, tidak dipakai di logika apapun',
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_kode_matrix (kode_matrix),
+  KEY idx_kode_barang (kode_barang),
+  CONSTRAINT fk_pemetaan_barang_matrix FOREIGN KEY (kode_barang) REFERENCES ag_barang(kode_barang) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- =====================================================================
 -- ag_por_h / ag_por_d : PESANAN DARI TOKO ("Purchase Order" toko ke
 -- kita, padanan AGTRPORH/AGTRPORD di Clipper asli -- ternyata salah
@@ -818,7 +893,7 @@ CREATE TABLE IF NOT EXISTS ag_barcode_barang (
 CREATE TABLE IF NOT EXISTS ag_por_h (
   nomor_por  VARCHAR(6) NOT NULL COMMENT 'Nomor_PorH',
   tgl_por    DATE NOT NULL        COMMENT 'Tgl_PorH',
-  kode_toko  VARCHAR(6) NOT NULL  COMMENT 'Toko_PorH',
+  kode_toko  VARCHAR(10) NOT NULL COMMENT 'Toko_PorH -- diperlebar bareng ag_toko.kode_toko, lihat komentarnya',
   nilai      DECIMAL(15,2) NOT NULL DEFAULT 0 COMMENT 'dihitung dari total detail',
   batal      TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Baru -- soft cancel kalau toko batalkan pesanan sebelum ada nota sama sekali',
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -870,3 +945,32 @@ CREATE TABLE IF NOT EXISTS ag_histori_harga_hpp (
   PRIMARY KEY (kode_barang, tanggal),
   KEY idx_kode_tanggal (kode_barang, tanggal)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- =====================================================================
+-- BATCH 56: Nilai Transfer Antar Gudang (AGE385.PRG) + Rekap Penjualan
+-- Salesman per-Nota dengan Retur (AGR961.PRG/AGR9612) -- ditemukan dari
+-- perbandingan referensi source Clipper AGE317/AGE385/AGR901/AGR961 yang
+-- diserahkan client.
+--
+-- Kode Clipper asli (AGE385) menyimpan Harga_BpbD & Nilai_BpbD per baris
+-- Bon Pindah Barang (fungsi AmbilHrgtr(), ambil HPP dari tabel THpp yang
+-- berlaku pada tanggal Bon) -- transfer antar gudang di kode asli SELALU
+-- punya NILAI (valuasi stok pindah gudang), bukan cuma catatan qty.
+-- Sebelum batch ini, versi Node `pengambilan` HANYA menyimpan qty --
+-- data valuasi tsb hilang saat migrasi. Sekarang harga di-auto-isi dari
+-- ag_histori_harga_hpp (hpp1 pada/sebelum tgl_bpb), fallback ke
+-- ag_barang.harga_rata kalau tidak ada histori -- pola SAMA PERSIS
+-- dengan Laporan Laba Kotor (batch 39, lihat ambilBarisMargin() di
+-- modules/laporan/model.js), 1 definisi "HPP yang berlaku pada tanggal
+-- X" dipakai ulang, bukan dihitung beda-beda di tiap tempat.
+-- =====================================================================
+SET FOREIGN_KEY_CHECKS = 0;
+
+ALTER TABLE ag_bpb_d
+  ADD COLUMN harga DECIMAL(15,2) NOT NULL DEFAULT 0 COMMENT 'Harga_BpbD - HPP per satuan besar (Karton), auto-isi dari ag_histori_harga_hpp pada/sebelum tgl_bpb (fallback ag_barang.harga_rata), bisa ditimpa manual' AFTER qty,
+  ADD COLUMN nilai DECIMAL(15,2) NOT NULL DEFAULT 0 COMMENT 'Nilai_BpbD = qty x harga' AFTER harga;
+
+ALTER TABLE ag_bpb_h
+  ADD COLUMN nilai DECIMAL(15,2) NOT NULL DEFAULT 0 COMMENT 'Nilai_BpbH - total nilai transfer, SUM(nilai) dari ag_bpb_d, pola sama dgn ag_por_h/ag_ord_h/ag_rot_h.nilai' AFTER kode_gudang_tujuan;
+
+SET FOREIGN_KEY_CHECKS = 1;
