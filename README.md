@@ -17,7 +17,7 @@ dari beberapa prinsipal/supplier). Alur bisnis intinya:
 ```
 PRINSIPAL (supplier)  →  GUDANG KITA  →  TOKO (pelanggan)
       │                      │                  │
-   Order/Beli            Simpan Stok        Jual/Piutang
+  Beli/Hutang            Simpan Stok        Jual/Piutang
 ```
 
 Aplikasi berjalan di browser (Chrome/Edge/Firefox), diakses lewat jaringan
@@ -104,7 +104,13 @@ pilihan dropdown):
    bagian 13 soal ini)
 3. **Utility → Notifikasi WhatsApp** (opsional) — isi `.env`
    (`API_URL_WA`, `WA_NOMOR_OWNER`, dll), set `WA_NOTIFIKASI_AKTIF=true`
-   kalau gateway WA sudah siap, lalu kirim 1 pesan tes dari halaman ini
+   kalau gateway WA sudah siap, lalu kirim 1 pesan tes dari halaman ini.
+   Halaman ini juga jadi tempat **cek riwayat notifikasi yang sudah
+   terkirim** (log lengkap dengan filter tanggal & jenis pesan) dan
+   **tombol jalankan manual** untuk 3 tugas otomatisnya (Rekap Harian,
+   Reminder Jatuh Tempo, Alert Stok Kritis) — berguna kalau mau
+   memicunya di luar jam terjadwal, atau kalau ternyata terlewat pas
+   servernya sempat mati pas jamnya.
 
 ### 3.5 Saldo Awal (kalau migrasi dari sistem lama)
 - **Gudang → Nota Kredit Awal** — masukkan saldo piutang/CN toko yang
@@ -228,23 +234,98 @@ atau barang baru dari Matrix yang belum terdaftar):
 
 ---
 
+## 5b. Alur Kerja — Import Analisa Pembelian dari Matrix
+
+**Beda dengan bagian 5 di atas** — ini modul terpisah, bukan bagian dari
+alur import transaksi penjualan SFA. **Pembelian Matrix** dipakai untuk
+mengimpor laporan pembelian/margin dari file Excel "Matrix" (laporan
+analisa pembelian per prinsipal, bukan file transaksi kunjungan sales),
+untuk keperluan rekap margin & disc allowance per barang serta ekspor ke
+tim akunting.
+
+Ringkas alurnya:
+1. **Utility → Pembelian Matrix → Pemetaan Suplier** — petakan dulu kode
+   suplier di file Matrix ke kode Prinsipal kita (sekali di awal, sama
+   prinsipnya dengan Pemetaan Barang Matrix di bagian 5.2)
+2. **Utility → Pembelian Matrix → Import** — upload file Excel (`.xlsx`)
+   laporannya
+3. Hasil impor tersimpan sebagai dokumen tersendiri (bisa dilihat
+   detailnya, dihapus kalau salah upload)
+4. **Export** — unduh rekapnya dalam format Excel untuk dikirim ke
+   bagian akunting/jurnal
+
+Field **Margin Matrix (%)** dan **Disc. Allowance Matrix (%)** ikut
+ditambahkan di halaman edit Master Barang untuk keperluan modul ini.
+
+Level akses: Level ≤3 (Supervisor ke atas) untuk Import & kelola
+Pemetaan Suplier. Panduan detail step-by-step (dengan contoh tangkapan
+layar) ada di dokumen terpisah **"Panduan Pemakaian Pembelian Matrix"**
+— minta ke developer kalau belum punya salinannya.
+
+---
+
 ## 6. Alur Kerja — Pengadaan Barang (Procure-to-Stock)
 
 ```
 Butuh restok barang dari prinsipal
       ↓
-[Gudang → Surat Pesanan (PO)]     ← order ke prinsipal
+[Gudang → Surat Pesanan (PO)]     ← order ke prinsipal (opsional, lihat catatan di bawah)
       ↓
 Barang datang dari prinsipal
       ↓
-[Gudang → Penerimaan Barang]      ← WAJIB dicocokkan ke Surat Pesanan
+[Gudang → Penerimaan Barang]      ← catat barang masuk, PO opsional
       ↓
-Stok otomatis bertambah di Kartu Stok
+Stok otomatis bertambah di Kartu Stok, Hutang ke Prinsipal otomatis tercatat
+      ↓
+[Hutang → Pembayaran]             ← saat kita bayar ke prinsipal (lihat bagian 6.2)
 ```
 
-Penerimaan Barang **wajib** merujuk ke Surat Pesanan yang sudah dibuat
-(validasi otomatis, barang yang diterima harus ada di PO-nya) — ini
-mencegah barang masuk tanpa jejak pemesanan resminya.
+### 6.1 Penerimaan Barang — dengan atau tanpa Surat Pesanan
+
+**No. Pesanan di form Penerimaan Barang sifatnya OPSIONAL** (per update
+terbaru — sebelumnya wajib, sekarang dilonggarkan supaya sesuai kondisi
+lapangan yang sebenarnya):
+
+- **Kalau diisi** — sistem mencocokkan ke Surat Pesanan yang sudah dibuat,
+  Prinsipal otomatis terisi dari PO tsb (tidak bisa dipilih manual, supaya
+  tidak mungkin beda dari prinsipal aslinya), dan barang yang diterima
+  harus ada di baris PO itu.
+- **Kalau dikosongkan** — dipakai untuk barang yang datang **tanpa PO
+  didahului** (mis. kiriman konsinyasi/titipan dari prinsipal, barang
+  sample, atau PO baru dibuatkan belakangan setelah barang fisik tiba).
+  Dalam kondisi ini, **Prinsipal wajib dipilih manual** lewat field
+  pencarian yang muncul di form, dan kode barang yang diinput tetap
+  divalidasi ke Master Barang (tapi tidak perlu cocok ke baris PO
+  manapun, karena memang tidak ada PO-nya).
+
+Pilih mana yang dipakai sesuai kondisi riil: kalau memang ada Surat
+Pesanan yang mendahului, tetap isi No. Pesanan-nya (lebih tertelusur).
+Kosongkan hanya kalau barangnya benar sudah datang duluan.
+
+### 6.2 Hutang ke Prinsipal & Pembayarannya
+
+Tiap **Penerimaan Barang** yang tersimpan otomatis jadi catatan hutang ke
+prinsipal terkait (nilainya dihitung dari qty × harga tiap baris barangnya)
+— polanya sama persis dengan Piutang toko di bagian 8, cuma arahnya
+kebalik (kita yang berhutang & yang bayar, bukan yang ditagih):
+
+- **Hutang → Pembayaran** — catat pembayaran ke prinsipal, cari nomor
+  Penerimaan Barang yang masih ada sisa hutangnya (datalist pencarian
+  otomatis cuma menampilkan yang belum lunas), isi nilai bayar (boleh
+  cicil/sebagian, sistem cegah bayar lebih dari sisa hutangnya), pilih
+  jenis bayar (Cash/Transfer atau Giro — kalau Giro, isi No. Giro & Tgl
+  Jatuh Tempo Giro-nya).
+- Saldo hutang per Penerimaan Barang dihitung **langsung (live)** setiap
+  kali dibutuhkan, bukan disimpan di kolom terpisah — jadi selalu akurat
+  meski ada perubahan baris barang setelahnya.
+- Level akses: Staf (Level 4) boleh catat pembayaran, Supervisor
+  (Level ≤3) yang boleh menghapusnya.
+- Belum ada mekanisme "Retur ke Prinsipal otomatis mengurangi hutang" —
+  kalau retur perlu mengurangi hutang yang belum dibayar, catat manual
+  dulu sebagai pengurang lewat pembayaran jenis Cash/Transfer biasa.
+- Lihat progress-nya di **Laporan → Umur Hutang** (aging per prinsipal,
+  mirip Umur Piutang) dan **Laporan → Pembayaran Hutang** (rekap yang
+  sudah dibayar per periode).
 
 ---
 
@@ -305,6 +386,10 @@ Semua di menu **Laporan**:
 | Rugi Laba Sederhana | Laba Kotor dikurangi Biaya Operasional (bukan pembukuan resmi) |
 | Umur Piutang | Aging piutang per toko (bucket 0-30/31-60/61-90/90+ hari) |
 | Monitoring Tagihan | Detail per-nota jatuh tempo (lihat bagian 8) |
+| Pembayaran Piutang | Rekap pembayaran yang sudah diterima dari toko per periode |
+| Umur Hutang | Aging hutang ke prinsipal per Penerimaan Barang (bucket sama seperti Umur Piutang, lihat bagian 6.2) |
+| Pembayaran Hutang | Rekap pembayaran yang sudah dilakukan ke prinsipal per periode |
+| Laporan Pembelian | Rekap Penerimaan Barang per Prinsipal/Barang (bisa pilih pengelompokannya) |
 | Laporan Stok | Posisi stok per barang per gudang |
 | Laporan Retur | Rekap retur toko & retur prinsipal |
 | Analisa Budget Barang | Realisasi vs target budget per barang |
@@ -338,12 +423,12 @@ Semua di menu **Laporan**:
 
 | Frekuensi | Aktivitas |
 |---|---|
-| **Tiap transaksi** | Nota Penjualan, Pembayaran, Penerimaan Barang |
+| **Tiap transaksi** | Nota Penjualan, Pembayaran (Piutang), Penerimaan Barang |
 | **Harian** | Cek Beranda, proses Pesanan dari Toko baru, notifikasi WA otomatis jalan sendiri, import laporan Matrix (kalau tim sales pakai Matrix & laporannya harian) |
-| **Mingguan** | Pengambilan/Transfer antar gudang (kalau perlu), review Monitoring Tagihan, import Matrix (kalau laporannya mingguan) |
-| **Bulanan** | Stok Opname per gudang, Laporan Laba Kotor & Rugi Laba, catat Biaya Operasional |
+| **Mingguan** | Pengambilan/Transfer antar gudang (kalau perlu), review Monitoring Tagihan, bayar Hutang ke Prinsipal yang jatuh tempo, import Matrix (kalau laporannya mingguan) |
+| **Bulanan** | Stok Opname per gudang, Laporan Laba Kotor & Rugi Laba, catat Biaya Operasional, cek Laporan Umur Hutang |
 | **Sebelum operasi berisiko** | Backup Data manual |
-| **Sesekali/insidental** | Retur Toko/Prinsipal, Nota Kredit Awal (cuma saat migrasi) |
+| **Sesekali/insidental** | Retur Toko/Prinsipal, Nota Kredit Awal (cuma saat migrasi), Import Pembelian Matrix (kalau ada laporan baru dari prinsipal) |
 
 ---
 
@@ -365,10 +450,13 @@ Transaksi
 Piutang
  └─ Pembayaran
 
+Hutang
+ └─ Pembayaran (ke Prinsipal — lihat bagian 6.2)
+
 Gudang
  ├─ Saldo Stok (Kartu Stok)
  ├─ Surat Pesanan (PO ke Prinsipal)
- ├─ Penerimaan Barang
+ ├─ Penerimaan Barang           (No. Pesanan opsional, lihat bagian 6.1)
  ├─ Pengambilan / Transfer
  ├─ Retur Toko / CN
  ├─ Retur ke Prinsipal
@@ -384,8 +472,9 @@ Utility
  ├─ Biaya Operasional
  ├─ Backup Data                (Level 1)
  ├─ Log Aktivitas              (Level ≤2)
- ├─ Notifikasi WhatsApp        (Level ≤2)
- └─ Import dari Matrix         (Level ≤3, termasuk Pemetaan Barang Matrix)
+ ├─ Notifikasi WhatsApp        (Level ≤2, termasuk log riwayat & jalankan manual)
+ ├─ Import dari Matrix         (Level ≤3, termasuk Pemetaan Barang Matrix)
+ └─ Pembelian Matrix           (Level ≤3, lihat bagian 5b — fitur terpisah dari Import dari Matrix di atas)
 ```
 
 ---
@@ -419,7 +508,8 @@ Ringkas — detail lengkap tiap poin ada di `README.md`:
 
 ---
 
-*Dokumen ini dibuat berdasarkan kondisi aplikasi saat ini (47 batch
-pengembangan, terakhir diupdate setelah fitur Satuan Sedang, Tarif PPN
-Configurable, Diskon di Retur Toko, dan Import dari Matrix ditambahkan).
+*Dokumen ini dibuat berdasarkan kondisi aplikasi saat ini (47+ batch
+pengembangan, terakhir diupdate setelah fitur: No. Pesanan opsional di
+Penerimaan Barang, modul Hutang & Pembayaran Hutang ke Prinsipal, dan
+modul Pembelian Matrix ditambahkan).
 Kalau ada modul baru ditambahkan, roadmap ini perlu di-update mengikuti.*
