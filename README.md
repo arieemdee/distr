@@ -259,8 +259,7 @@ ditambahkan di halaman edit Master Barang untuk keperluan modul ini.
 
 Level akses: Level ≤3 (Supervisor ke atas) untuk Import & kelola
 Pemetaan Suplier. Panduan detail step-by-step (dengan contoh tangkapan
-layar) ada di dokumen terpisah **"Panduan Pemakaian Pembelian Matrix"**
-— minta ke developer kalau belum punya salinannya.
+layar) ada di dokumen terpisah Download => **"[Panduan Pemakaian Pembelian Matrix](Panduan-Pemakaian-Pembelian-Matrix.docx)"**.
 
 ---
 
