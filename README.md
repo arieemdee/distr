@@ -203,14 +203,20 @@ atau barang baru dari Matrix yang belum terdaftar):
 2. Buka **Utility → Import dari Matrix**
 3. Upload file-nya, lalu pilih:
    - **Gudang Tujuan** — gudang mana yang stoknya dikurangi/ditambah
-     akibat transaksi-transaksi ini
-   - **Satuan Qty di File** — defaultnya "Satuan Kecil/Pcs", ganti ke
-     "Satuan Besar/Karton" kalau ternyata data dari Matrix dicatat
-     dalam Karton bukan Pcs (tanya tim yang urus Matrix kalau tidak
-     yakin)
+     akibat transaksi-transaksi ini (berlaku juga untuk retur R1/lihat
+     poin di bawah)
+   - **Gudang Retur Expired (R2)** — gudang khusus untuk retur toko yang
+     kondisi barangnya sudah expired, terpisah dari gudang biasa. Sudah
+     ada isian bawaan "EXP" (gudang "RETUR EXPIRED (R2)"), bisa diganti
+     kalau mau pakai gudang lain. Hanya dipakai kalau di file memang ada
+     retur kondisi expired.
+   - **Satuan Qty di File** — defaultnya "Satuan Kecil/Pcs" (sudah
+     dikonfirmasi ke tim Matrix bahwa ini yang benar), ganti ke
+     "Satuan Besar/Karton" hanya kalau ternyata ada file dengan format beda
 4. Klik **Import**, tunggu prosesnya selesai
 5. Cek hasilnya:
-   - **Berhasil** — jumlah Nota/Retur yang berhasil dibuat
+   - **Berhasil** — jumlah Nota/Retur yang berhasil dibuat, termasuk
+     rincian berapa retur kondisi bagus (R1) dan berapa expired (R2)
    - **Dilewati** — transaksi yang SUDAH PERNAH diimpor sebelumnya
      (sistem otomatis mendeteksi ini, jadi upload file yang sama 2x
      TIDAK akan bikin data dobel)
@@ -219,6 +225,8 @@ atau barang baru dari Matrix yang belum terdaftar):
      barang belum dipetakan) — perbaiki penyebabnya, lalu upload ulang
      file yang sama (yang sudah berhasil otomatis dilewati, cuma yang
      gagal kemarin yang akan diproses ulang)
+   - **Peringatan** — baris yang tetap berhasil diimpor tapi ada yang
+     janggal (lihat poin XQTYPCS di bawah), untuk dicek ulang datanya
 
 ### 5.4 Yang perlu diketahui (supaya tidak salah paham)
 
@@ -227,10 +235,21 @@ atau barang baru dari Matrix yang belum terdaftar):
 - Cek limit kredit/plafon toko **tidak berlaku** untuk transaksi hasil
   import (karena ini transaksi yang sudah benar-benar terjadi di masa
   lalu, bukan keputusan kredit baru yang perlu di-approve)
-- Field tertentu di data Matrix (kode "KG" dan "XQTYPCS") saat ini
-  **tidak dipakai** dalam perhitungan apapun — kalau ke depannya
-  ternyata field itu penting untuk bisnis, perlu didiskusikan ulang
-  cara pakainya
+- **Retur otomatis dipecah jadi 2 dokumen kalau isinya campuran** —
+  field "KG" di data Matrix menandai kondisi barang retur (R1 = masih
+  bagus, R2 = sudah expired). Kalau 1 faktur retur dari Matrix berisi
+  campuran R1 dan R2, sistem membuat **2 dokumen Retur Toko terpisah**:
+  yang R1 masuk Gudang Tujuan biasa (bisa dijual lagi), yang R2 masuk
+  Gudang Retur Expired (tidak tercampur dengan stok layak jual). Kalau
+  ada baris retur yang kondisinya tidak jelas di data Matrix, sistem
+  menganggapnya R1 dan memberi peringatan supaya dicek manual.
+- **QTYPCS** (qty di file) sudah dipastikan dalam satuan Pcs (satuan
+  terkecil), dan **XQTYPCS** (rincian qty asli per satuan besar/tengah/
+  kecil) dipakai untuk **mengecek ulang** apakah qty di file sudah sesuai
+  dengan isi Karton/Sedang yang terdaftar di Master Barang. Kalau tidak
+  cocok, transaksinya **tetap berhasil diimpor**, tapi barisnya muncul di
+  daftar Peringatan supaya bisa dicek — biasanya tandanya isi per Karton
+  di Master Barang belum benar
 
 ---
 
@@ -335,7 +354,11 @@ Dipakai berkala (mingguan/bulanan), bukan tiap hari:
 - **Pengambilan/Transfer** — pindah stok antar gudang (kalau ada lebih
   dari 1 gudang)
 - **Retur Toko / CN** — toko mengembalikan barang, otomatis jadi Nota
-  Kredit (CN) yang mengurangi piutang toko itu. Kalau Retur ditautkan ke
+  Kredit (CN) yang mengurangi piutang toko itu. Ada isian **Kondisi
+  Retur** (R1 = masih bagus, R2 = expired) yang menentukan barangnya
+  masuk gudang mana — tampil juga di daftar Retur Toko dan Laporan Retur.
+  Untuk retur manual (bukan dari import Matrix), isian ini opsional.
+  Kalau Retur ditautkan ke
   Nomor Nota Penjualan aslinya (field "Nomor Nota Asli"), dan Nota
   aslinya ada diskon, harga & diskon di baris Retur bisa **otomatis
   ke-isi sama persis** dengan Nota asli begitu barangnya dipilih (tetap
@@ -390,7 +413,7 @@ Semua di menu **Laporan**:
 | Pembayaran Hutang | Rekap pembayaran yang sudah dilakukan ke prinsipal per periode |
 | Laporan Pembelian | Rekap Penerimaan Barang per Prinsipal/Barang (bisa pilih pengelompokannya) |
 | Laporan Stok | Posisi stok per barang per gudang |
-| Laporan Retur | Rekap retur toko & retur prinsipal |
+| Laporan Retur | Rekap retur toko & retur prinsipal, termasuk rekap per Kondisi Retur (bagus/expired) |
 | Analisa Budget Barang | Realisasi vs target budget per barang |
 | Analisa Penjualan Salesman | Kinerja tiap salesman |
 | Deviasi Omzet | Salesman dengan pola retur mencurigakan |
@@ -497,18 +520,21 @@ Ringkas — detail lengkap tiap poin ada di `README.md`:
   dibuat — kalau tarif default diubah di kemudian hari (mis. aturan
   pajak berubah), Nota-nota LAMA tidak ikut berubah, tetap konsisten
   dengan tarif yang berlaku waktu Nota itu dibuat
-- **Import dari Matrix**: beberapa field di data Matrix (kode "KG" dan
-  "XQTYPCS") maknanya belum bisa dipastikan sampai saat ini, jadi
-  sengaja tidak dipakai dalam perhitungan apapun. Satuan qty (Karton
-  atau Pcs) di file Matrix perlu dipilih manual tiap kali import (satu
-  pilihan berlaku untuk seluruh file yang diupload)
+- **Import dari Matrix**: field "KG" (kondisi retur R1/R2) dan "XQTYPCS"
+  (validasi silang qty) sudah dipakai — lihat bagian 5.4. Satuan qty
+  (Karton atau Pcs) di file Matrix tetap perlu dipilih manual tiap kali
+  import (satu pilihan berlaku untuk seluruh file yang diupload), dan
+  hanya perlu diganti kalau ada file dengan format tidak biasa
+- **Barang bonus tidak dicek ketersediaan stoknya** — sama seperti baris
+  Nota biasa, sistem tidak menolak input bonus/penjualan meski stok
+  gudang sudah tidak cukup (belum ada validasi stok minus)
 - Semua penyederhanaan lain didokumentasikan di `README.md` per fitur,
   dengan alasan kenapa dan cara memperluasnya kalau suatu saat dibutuhkan
 
 ---
 
-*Dokumen ini dibuat berdasarkan kondisi aplikasi saat ini (47+ batch
-pengembangan, terakhir diupdate setelah fitur: No. Pesanan opsional di
-Penerimaan Barang, modul Hutang & Pembayaran Hutang ke Prinsipal, dan
-modul Pembelian Matrix ditambahkan).
+*Dokumen ini dibuat berdasarkan kondisi aplikasi saat ini (60+ batch
+pengembangan, terakhir diupdate setelah fitur: field KG (Kondisi Retur
+R1/R2) & XQTYPCS di Import Matrix diterapkan, dan Barang Bonus di Nota
+Penjualan sekarang tercetak di Nota dan otomatis mengurangi stok gudang).
 Kalau ada modul baru ditambahkan, roadmap ini perlu di-update mengikuti.*
